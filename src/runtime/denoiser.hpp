@@ -726,9 +726,10 @@ inline float flux_time_shift(float mu, float sigma, float t) {
 
 // https://github.com/black-forest-labs/flux/blob/main/src/flux/sampling.py#L289
 struct FluxScheduler : SigmaScheduler {
-    int image_seq_len = 0;
-    float base_shift  = 0.5f;
-    float max_shift   = 1.15f;
+    int image_seq_len       = 0;
+    float base_shift        = 0.5f;
+    float max_shift         = 1.15f;
+    float shift_terminal    = -1.0f;
 
     explicit FluxScheduler(int image_seq_len, const char* extra_sample_args = nullptr)
         : image_seq_len(image_seq_len) {
@@ -743,6 +744,10 @@ struct FluxScheduler : SigmaScheduler {
                 }
             } else if (key == "max_shift") {
                 if (!parse_strict_float(value, max_shift)) {
+                    LOG_WARN("ignoring invalid flux scheduler arg '%s=%s'", key.c_str(), value.c_str());
+                }
+            } else if (key == "shift_terminal") {
+                if (!parse_strict_float(value, shift_terminal)) {
                     LOG_WARN("ignoring invalid flux scheduler arg '%s=%s'", key.c_str(), value.c_str());
                 }
             }
@@ -762,7 +767,8 @@ struct FluxScheduler : SigmaScheduler {
         sigmas.reserve(n + 1);
 
         float mu = compute_mu();
-        LOG_VERBOSE("Flux scheduler: image_seq_len=%d, steps=%u, mu=%.3f", image_seq_len, n, mu);
+        LOG_VERBOSE("Flux scheduler: image_seq_len=%d, steps=%u, mu=%.3f, terminal=%.4f",
+                    image_seq_len, n, mu, shift_terminal);
 
         if (n == 0) {
             sigmas.push_back(1.0f);
@@ -775,6 +781,21 @@ struct FluxScheduler : SigmaScheduler {
                 sigmas.push_back(0.0f);
             } else {
                 sigmas.push_back(flux_time_shift(mu, 1.0f, t));
+            }
+        }
+
+        // Diffusers' FlowMatchEulerDiscreteScheduler can stretch the shifted
+        // schedule so its last non-zero sigma lands on shift_terminal. Qwen
+        // Image 2.1 ships shift_terminal=0.02; distilled variants such as
+        // Viggle Turbo intentionally leave it unset. Keep the behavior opt-in
+        // so existing FLUX users are unchanged.
+        if (shift_terminal >= 0.0f && shift_terminal < 1.0f && n > 1) {
+            const float one_minus_last = 1.0f - sigmas[n - 1];
+            const float scale_factor   = one_minus_last / (1.0f - shift_terminal);
+            if (scale_factor > 1e-8f) {
+                for (uint32_t i = 0; i < n; ++i) {
+                    sigmas[i] = 1.0f - (1.0f - sigmas[i]) / scale_factor;
+                }
             }
         }
 
