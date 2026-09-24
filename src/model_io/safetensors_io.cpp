@@ -247,6 +247,13 @@ bool read_safetensors_file(const std::string& file_path,
         std::string dtype    = tensor_info["dtype"];
         nlohmann::json shape = tensor_info["shape"];
 
+        // Activation scales are quantizer hints, not model parameters. Once
+        // activations are represented by the runtime's normal F16/F32 tensors
+        // there is nothing to load or validate for these entries.
+        if (ends_with(name, ".scale_input")) {
+            continue;
+        }
+
         size_t begin = tensor_info["data_offsets"][0].get<size_t>();
         size_t end   = tensor_info["data_offsets"][1].get<size_t>();
         if (begin > end || end > file_size_ - data_start) {
@@ -341,13 +348,26 @@ bool read_safetensors_file(const std::string& file_path,
                 tensor_storage.int8_convrot            = config->second.convrot;
                 tensor_storage.int8_convrot_group_size = config->second.group_size;
             }
-        } else if (ends_with(name, ".weight_scale")) {
-            const std::string module_name = name.substr(0, name.size() - std::string(".weight_scale").size());
-            auto config                   = comfy_quant_configs.find(module_name);
-            if (config != comfy_quant_configs.end() && config->second.format == "int8_tensorwise" &&
-                tensor_storage.n_dims == 2 && tensor_storage.ne[0] == 1) {
-                tensor_storage.ne[0]  = tensor_storage.ne[1];
-                tensor_storage.ne[1]  = 1;
+        } else if (ends_with(name, ".weight_scale") ||
+                   ends_with(name, ".scale_weight") ||
+                   ends_with(name, "._weight_scale")) {
+            // Scale vectors are serialized by different producers as [N],
+            // [N, 1], [1, N], or the same vector with additional singleton
+            // axes. They are semantically identical. Canonicalize only shapes
+            // with at most one non-singleton axis; true block/group scale
+            // matrices keep their original rank and still receive strict model
+            // metadata validation.
+            int non_singleton_dims = 0;
+            for (int i = 0; i < tensor_storage.n_dims; ++i) {
+                if (tensor_storage.ne[i] != 1) {
+                    ++non_singleton_dims;
+                }
+            }
+            if (elements > 0 && non_singleton_dims <= 1) {
+                tensor_storage.ne[0] = static_cast<int64_t>(elements);
+                for (int i = 1; i < SD_MAX_DIMS; ++i) {
+                    tensor_storage.ne[i] = 1;
+                }
                 tensor_storage.n_dims = 1;
             }
         }
