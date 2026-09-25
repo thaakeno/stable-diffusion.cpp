@@ -780,6 +780,7 @@ namespace sd::pipeline {
         }
 
         sd->reset_cancel_flag();
+        sd_report_phase(SD_PHASE_PREPARING);
 
         int64_t t0            = ggml_time_ms();
         sd->vae_tiling_params = sd_img_gen_params->vae_tiling_params;
@@ -798,6 +799,7 @@ namespace sd::pipeline {
         ImageVaeAxesGuard axes_guard(sd, sd_img_gen_params, request);
 
         SamplePlan plan(sd, sd_img_gen_params, request);
+        sd_report_phase(SD_PHASE_ENCODING_INPUT);
         auto latents_opt = prepare_image_generation_latents(sd,
                                                             sd_img_gen_params,
                                                             &request,
@@ -808,6 +810,7 @@ namespace sd::pipeline {
         }
         ImageGenerationLatents latents = std::move(*latents_opt);
 
+        sd_report_phase(SD_PHASE_ENCODING_PROMPT);
         auto embeds_opt = prepare_image_generation_embeds(sd,
                                                           sd_img_gen_params,
                                                           &request,
@@ -820,6 +823,7 @@ namespace sd::pipeline {
         ImageGenerationEmbeds embeds = std::move(*embeds_opt);
 
         std::vector<sd::Tensor<float>> final_latents;
+        sd_report_phase(SD_PHASE_DENOISING);
         int64_t denoise_start = ggml_time_ms();
         for (int b = 0; b < request.batch_count; b++) {
             sd_cancel_mode_t cancel = sd->get_cancel_flag();
@@ -1011,12 +1015,14 @@ namespace sd::pipeline {
             final_latents = std::move(hires_final_latents);
         }
 
+        sd_report_phase(SD_PHASE_DECODING);
         int num_images = 0;
         auto result    = decode_image_outputs(sd, request, final_latents, &num_images);
         if (result == nullptr) {
             return false;
         }
 
+        sd_report_phase(SD_PHASE_FINALIZING);
         sd->lora_stat();
 
         int64_t t1 = ggml_time_ms();

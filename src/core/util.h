@@ -99,6 +99,9 @@ std::vector<std::pair<std::string, float>> split_quotation_attention(
 
 sd_progress_cb_t sd_get_progress_callback();
 void* sd_get_progress_callback_data();
+sd_phase_cb_t sd_get_phase_callback();
+void* sd_get_phase_callback_data();
+void sd_report_phase(enum sd_generation_phase_t phase);
 
 sd_preview_cb_t sd_get_preview_callback();
 void* sd_get_preview_callback_data();

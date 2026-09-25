@@ -342,6 +342,8 @@ int32_t sd_get_num_physical_cores() {
 
 static sd_progress_cb_t sd_progress_cb = nullptr;
 void* sd_progress_cb_data              = nullptr;
+static sd_phase_cb_t sd_phase_cb       = nullptr;
+void* sd_phase_cb_data                 = nullptr;
 
 static sd_preview_cb_t sd_preview_cb = nullptr;
 static void* sd_preview_cb_data      = nullptr;
@@ -646,6 +648,13 @@ void sd_set_progress_callback(sd_progress_cb_t cb, void* data) {
     sd_progress_cb      = cb;
     sd_progress_cb_data = data;
 }
+void sd_set_phase_callback(sd_phase_cb_t cb, void* data) {
+    sd_phase_cb      = cb;
+    sd_phase_cb_data = data;
+}
+void sd_report_phase(enum sd_generation_phase_t phase) {
+    if (sd_phase_cb) sd_phase_cb(phase, sd_phase_cb_data);
+}
 void sd_set_preview_callback(sd_preview_cb_t cb, preview_t mode, int interval, bool denoised, bool noisy, void* data) {
     sd_preview_cb       = cb;
     sd_preview_cb_data  = data;
@@ -693,6 +702,12 @@ sd_progress_cb_t sd_get_progress_callback() {
 }
 void* sd_get_progress_callback_data() {
     return sd_progress_cb_data;
+}
+sd_phase_cb_t sd_get_phase_callback() {
+    return sd_phase_cb;
+}
+void* sd_get_phase_callback_data() {
+    return sd_phase_cb_data;
 }
 
 sd_image_t tensor_to_sd_image(const sd::Tensor<float>& tensor, int frame_index) {
