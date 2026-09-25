@@ -384,14 +384,14 @@ namespace sd::pipeline {
                          sigmas.size(), sd_scheduler_name(scheduler));
             }
             total_steps = static_cast<int>(sigmas.size()) - 1;
-            LOG_WARN("total_steps != custom_sigmas_count - 1, set total_steps to %d", total_steps);
+            LOG_INFO("custom sigma schedule defines %d sampling intervals", total_steps);
             if (sample_steps >= total_steps) {
                 sample_steps = total_steps;
-                LOG_WARN("total_steps != custom_sigmas_count - 1, set sample_steps to %d", sample_steps);
+                LOG_INFO("sample_steps clamped to custom sigma schedule: %d", sample_steps);
             }
             if (high_noise_sample_steps > 0) {
                 high_noise_sample_steps = total_steps - sample_steps;
-                LOG_WARN("total_steps != custom_sigmas_count - 1, set high_noise_sample_steps to %d", high_noise_sample_steps);
+                LOG_INFO("high_noise_sample_steps adjusted for custom sigma schedule: %d", high_noise_sample_steps);
             }
         } else {
             scheduler_t scheduler = resolve_scheduler(sd,

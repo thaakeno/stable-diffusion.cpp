@@ -1683,14 +1683,25 @@ static sd::Tensor<float> sample_euler(denoise_cb_t model,
                                       const std::vector<float>& sigmas) {
     int steps = static_cast<int>(sigmas.size()) - 1;
     for (int i = 0; i < steps; i++) {
-        float sigma       = sigmas[i];
-        auto denoised_opt = model(x, sigma, i + 1);
+        const int64_t step_start = ggml_time_ms();
+        float sigma              = sigmas[i];
+        auto denoised_opt        = model(x, sigma, i + 1);
         if (denoised_opt.pred.empty()) {
             return {};
         }
+        const int64_t model_end = ggml_time_ms();
         sd::Tensor<float> denoised = std::move(denoised_opt.pred);
         sd::Tensor<float> d        = (x - denoised) / sigma;
         x += d * (sigmas[i + 1] - sigma);
+        const int64_t step_end = ggml_time_ms();
+        LOG_INFO("Euler step %d/%d sigma %.6f -> %.6f: model %.2fs, update %.2fms, total %.2fs",
+                 i + 1,
+                 steps,
+                 sigma,
+                 sigmas[i + 1],
+                 (model_end - step_start) / 1000.0f,
+                 static_cast<float>(step_end - model_end),
+                 (step_end - step_start) / 1000.0f);
     }
     return x;
 }
