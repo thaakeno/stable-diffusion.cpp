@@ -161,6 +161,7 @@ protected:
 
     std::vector<ggml_backend_t> extra_runtime_backends;  // borrowed (SDBackendManager-owned)
     bool multi_device_eval_callback_warned = false;
+    ggml_status last_compute_status_ = GGML_STATUS_SUCCESS;
 
     std::shared_ptr<WeightAdapter> weight_adapter = nullptr;
     std::weak_ptr<DeviceResidencyManager> residency_manager;
@@ -275,6 +276,7 @@ public:
     bool runner_start();
 
     bool runner_started() const { return runner_started_; }
+    ggml_status last_compute_status() const { return last_compute_status_; }
 
     void runner_end();
 
