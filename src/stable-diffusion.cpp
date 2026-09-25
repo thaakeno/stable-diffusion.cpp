@@ -431,6 +431,7 @@ void sd_sample_params_init(sd_sample_params_t* sample_params) {
     sample_params->eta                         = INFINITY;
     sample_params->custom_sigmas               = nullptr;
     sample_params->custom_sigmas_count         = 0;
+    sample_params->custom_sigmas_are_raw        = false;
     sample_params->flow_shift                  = INFINITY;
     sample_params->extra_sample_args           = nullptr;
 }
@@ -454,6 +455,7 @@ char* sd_sample_params_to_str(const sd_sample_params_t* sample_params) {
              "sample_steps: %d, "
              "eta: %.2f, "
              "shifted_timestep: %d, "
+             "custom_sigmas_are_raw: %s, "
              "flow_shift: %.2f, "
              "extra_sample_args: %s)",
              sample_params->guidance.txt_cfg,
@@ -470,6 +472,7 @@ char* sd_sample_params_to_str(const sd_sample_params_t* sample_params) {
              sample_params->sample_steps,
              sample_params->eta,
              sample_params->shifted_timestep,
+             BOOL_STR(sample_params->custom_sigmas_are_raw),
              sample_params->flow_shift,
              SAFE_STR(sample_params->extra_sample_args));
 

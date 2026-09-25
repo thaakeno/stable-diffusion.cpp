@@ -288,6 +288,11 @@ typedef struct {
     int shifted_timestep;
     float* custom_sigmas;
     int custom_sigmas_count;
+    // When true, custom_sigmas are unshifted scheduler-domain nodes (0..1)
+    // and the model's native scheduler applies its resolution-dependent
+    // transform. This keeps distilled schedules model-aware without frontend
+    // copies of scheduler math.
+    bool custom_sigmas_are_raw;
     float flow_shift;
     const char* extra_sample_args;
 } sd_sample_params_t;

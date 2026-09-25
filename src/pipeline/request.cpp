@@ -370,8 +370,19 @@ namespace sd::pipeline {
         total_steps = sample_steps + std::max(0, high_noise_sample_steps);
 
         if (sample_params->custom_sigmas_count > 0) {
-            sigmas      = std::vector<float>(sample_params->custom_sigmas,
+            sigmas = std::vector<float>(sample_params->custom_sigmas,
                                         sample_params->custom_sigmas + sample_params->custom_sigmas_count);
+            if (sample_params->custom_sigmas_are_raw) {
+                scheduler_t scheduler = resolve_scheduler(sd,
+                                                          sample_params->scheduler,
+                                                          sample_method);
+                int sample_seq_len = sd->get_image_seq_len(request->height, request->width);
+                sigmas = sd->denoiser->transform_custom_sigmas(
+                    sigmas, sample_seq_len, scheduler, sd->version,
+                    sample_params->extra_sample_args);
+                LOG_INFO("transformed %zu raw custom sigma nodes with the native %s scheduler",
+                         sigmas.size(), sd_scheduler_name(scheduler));
+            }
             total_steps = static_cast<int>(sigmas.size()) - 1;
             LOG_WARN("total_steps != custom_sigmas_count - 1, set total_steps to %d", total_steps);
             if (sample_steps >= total_steps) {

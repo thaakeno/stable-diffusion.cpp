@@ -29,6 +29,9 @@ struct SigmaScheduler {
     typedef std::function<float(float)> t_to_sigma_t;
 
     virtual std::vector<float> get_sigmas(uint32_t n, float sigma_min, float sigma_max, t_to_sigma_t t_to_sigma) = 0;
+    virtual std::vector<float> transform_custom_sigmas(const std::vector<float>& raw) {
+        return raw;
+    }
 };
 
 struct DiscreteScheduler : SigmaScheduler {
@@ -771,45 +774,52 @@ struct FluxScheduler : SigmaScheduler {
         return static_cast<float>(image_seq_len) * m + b;
     }
 
-    std::vector<float> get_sigmas(uint32_t n, float /*sigma_min*/, float /*sigma_max*/, t_to_sigma_t /*t_to_sigma*/) override {
+    std::vector<float> transform_custom_sigmas(const std::vector<float>& raw) override {
         std::vector<float> sigmas;
-        sigmas.reserve(n + 1);
-
-        float mu = compute_mu();
-        LOG_VERBOSE("Flux scheduler: image_seq_len=%d, steps=%u, mu=%.3f, terminal=%.4f",
-                    image_seq_len, n, mu, shift_terminal);
-
-        if (n == 0) {
-            sigmas.push_back(1.0f);
-            return sigmas;
-        }
-
-        for (uint32_t i = 0; i <= n; ++i) {
-            float t = 1.0f - static_cast<float>(i) / static_cast<float>(n);
+        sigmas.reserve(raw.size());
+        const float mu = compute_mu();
+        for (float t : raw) {
             if (t <= 0.0f) {
                 sigmas.push_back(0.0f);
+            } else if (t >= 1.0f) {
+                sigmas.push_back(1.0f);
             } else {
                 sigmas.push_back(flux_time_shift(mu, 1.0f, t));
             }
         }
 
-        // Diffusers' FlowMatchEulerDiscreteScheduler can stretch the shifted
-        // schedule so its last non-zero sigma lands on shift_terminal. Qwen
-        // Image 2.1 ships shift_terminal=0.02; distilled variants such as
-        // Viggle Turbo intentionally leave it unset. Keep the behavior opt-in
-        // so existing FLUX users are unchanged.
-        if (shift_terminal >= 0.0f && shift_terminal < 1.0f && n > 1) {
-            const float one_minus_last = 1.0f - sigmas[n - 1];
-            const float scale_factor   = one_minus_last / (1.0f - shift_terminal);
-            if (scale_factor > 1e-8f) {
-                for (uint32_t i = 0; i < n; ++i) {
-                    sigmas[i] = 1.0f - (1.0f - sigmas[i]) / scale_factor;
+        // Stretch against the last non-zero node. Distilled schedules can
+        // explicitly disable this with shift_terminal=-1.
+        if (shift_terminal >= 0.0f && shift_terminal < 1.0f && sigmas.size() > 2) {
+            size_t last_nonzero = sigmas.size();
+            while (last_nonzero > 0 && sigmas[last_nonzero - 1] <= 0.0f) {
+                --last_nonzero;
+            }
+            if (last_nonzero > 1) {
+                const float one_minus_last = 1.0f - sigmas[last_nonzero - 1];
+                const float scale_factor = one_minus_last / (1.0f - shift_terminal);
+                if (scale_factor > 1e-8f) {
+                    for (size_t i = 0; i < last_nonzero; ++i) {
+                        sigmas[i] = 1.0f - (1.0f - sigmas[i]) / scale_factor;
+                    }
                 }
             }
         }
-
-        sigmas[n] = 0.0f;
         return sigmas;
+    }
+
+    std::vector<float> get_sigmas(uint32_t n, float /*sigma_min*/, float /*sigma_max*/, t_to_sigma_t /*t_to_sigma*/) override {
+        std::vector<float> raw;
+        raw.reserve(n + 1);
+        if (n == 0) {
+            return {1.0f};
+        }
+        for (uint32_t i = 0; i <= n; ++i) {
+            raw.push_back(1.0f - static_cast<float>(i) / static_cast<float>(n));
+        }
+        LOG_VERBOSE("Flux scheduler: image_seq_len=%d, steps=%u, mu=%.3f, terminal=%.4f",
+                    image_seq_len, n, compute_mu(), shift_terminal);
+        return transform_custom_sigmas(raw);
     }
 };
 
@@ -1083,6 +1093,19 @@ struct Denoiser {
 
     virtual sd::Tensor<float> process_latent_out(sd::Tensor<float> latent) {
         return latent;
+    }
+
+    virtual std::vector<float> transform_custom_sigmas(const std::vector<float>& raw,
+                                                       int image_seq_len,
+                                                       scheduler_t scheduler_type,
+                                                       SDVersion version,
+                                                       const char* extra_sample_args = nullptr) {
+        if (scheduler_type == FLUX_SCHEDULER) {
+            FluxScheduler scheduler(image_seq_len, version, extra_sample_args);
+            return scheduler.transform_custom_sigmas(raw);
+        }
+        LOG_WARN("raw custom sigma transform is only defined for FlowMatch/Flux schedulers; using values unchanged");
+        return raw;
     }
 
     virtual std::vector<float> get_sigmas(uint32_t n, int image_seq_len, scheduler_t scheduler_type, SDVersion version, const char* extra_sample_args = nullptr) {
