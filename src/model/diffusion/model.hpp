@@ -68,6 +68,9 @@ struct AnimaDiffusionExtra {
 
 struct QwenImage21DiffusionExtra {
     const sd::Tensor<int32_t>* image_slots = nullptr;
+    // Stable identifier for immutable text/reference prefix inputs during one
+    // sampling run. Zero disables prefix KV reuse.
+    uint64_t prefix_id = 0;
 };
 
 struct WanDiffusionExtra {
