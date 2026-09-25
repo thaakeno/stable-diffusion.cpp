@@ -802,11 +802,22 @@ std::optional<Tensor<float>> GGMLRunner::execute_graph(ggml_cgraph* graph, int n
     if (full_measurement.buffers.empty()) {
         return std::nullopt;
     }
+    auto fits_monolithic = [&]() {
+        // Leave enough HTP address-space slack for alignment/driver bookkeeping
+        // that is not represented in GGML's exact tensor-size estimate.
+        constexpr size_t planning_headroom = 128ULL * 1024ULL * 1024ULL;
+        auto requests = memory_requests(full_measurement.buffers, cache_.pending_bytes(graph));
+        for (auto& request : requests) {
+            request.pending_allocation_bytes =
+                add_bytes(request.pending_allocation_bytes, planning_headroom);
+        }
+        return fits(requests, params);
+    };
     auto manager         = residency_manager.lock();
     const bool segmented = !is_multi_device() && !sd_backend_is_cpu(runtime_backend) &&
                            manager != nullptr && manager->segmented_compute_enabled() &&
                            plan.valid && plan.has_cuts && plan.segments.size() > 1 &&
-                           !fits(memory_requests(full_measurement.buffers, cache_.pending_bytes(graph)), params);
+                           !fits_monolithic();
     if (!segmented) {
         ggml_graph_cut::Segment segment;
         segment.group_name          = "graph";
