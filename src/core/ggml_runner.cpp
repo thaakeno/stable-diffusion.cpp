@@ -505,9 +505,10 @@ GGMLRunner::~GGMLRunner() {
     free_params_ctx();
 }
 
-GGMLRunnerContext GGMLRunner::get_context() {
+GGMLRunnerContext GGMLRunner::get_context(ggml_cgraph* graph) {
     GGMLRunnerContext runner_ctx;
     runner_ctx.ggml_ctx              = compute_ctx;
+    runner_ctx.graph                 = graph;
     runner_ctx.backend               = runtime_backend;
     runner_ctx.flash_attn_enabled    = flash_attn_enabled;
     runner_ctx.conv2d_direct_enabled = conv2d_direct_enabled;
@@ -518,8 +519,8 @@ GGMLRunnerContext GGMLRunner::get_context() {
     runner_ctx.get_cache_tensor      = [this](const std::string& name) {
         return this->get_cache_tensor_by_name(name);
     };
-    runner_ctx.cache_tensor = [this](const std::string& name, ggml_tensor* tensor) {
-        this->cache(name, tensor);
+    runner_ctx.cache_tensor = [this, graph](const std::string& name, ggml_tensor* tensor) {
+        this->cache(name, tensor, graph);
     };
     runner_ctx.set_backend_tensor_data = [this](ggml_tensor* tensor, const void* data) {
         this->set_backend_tensor_data(tensor, data);
@@ -561,7 +562,7 @@ ggml_tensor* GGMLRunner::to_backend(ggml_tensor* tensor) {
     }
 }
 
-void GGMLRunner::cache(const std::string name, ggml_tensor* tensor) {
+void GGMLRunner::cache(const std::string name, ggml_tensor* tensor, ggml_cgraph* graph) {
     if (tensor != nullptr && tensor->view_src != nullptr) {
         tensor = ggml_cont(compute_ctx, tensor);
     }
@@ -569,6 +570,9 @@ void GGMLRunner::cache(const std::string name, ggml_tensor* tensor) {
         ggml_set_output(tensor);
     }
     cache_.stage(name, tensor);
+    if (graph != nullptr && tensor != nullptr) {
+        ggml_build_forward_expand(graph, tensor);
+    }
 }
 
 std::optional<sd::Tensor<float>> GGMLRunner::compute(get_graph_cb_t get_graph,

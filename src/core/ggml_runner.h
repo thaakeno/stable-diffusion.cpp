@@ -81,6 +81,7 @@ struct WeightAdapter {
 struct GGMLRunnerContext {
     ggml_backend_t backend                                           = nullptr;
     ggml_context* ggml_ctx                                           = nullptr;
+    ggml_cgraph* graph                                               = nullptr;
     bool flash_attn_enabled                                          = false;
     bool conv2d_direct_enabled                                       = false;
     bool circular_x_enabled                                          = false;
@@ -110,6 +111,12 @@ struct GGMLRunnerContext {
             return nullptr;
         }
         return get_cache_tensor(name);
+    }
+
+    void expand_graph(ggml_tensor* tensor) const {
+        if (graph != nullptr && tensor != nullptr) {
+            ggml_build_forward_expand(graph, tensor);
+        }
     }
 
     void persist_cache_tensor(const std::string& name, ggml_tensor* tensor) const {
@@ -288,7 +295,9 @@ public:
 
     virtual ~GGMLRunner();
 
-    virtual GGMLRunnerContext get_context();
+    // Binding a graph lets cache outputs be scheduled as soon as they are
+    // registered, before later graph segments consume them.
+    virtual GGMLRunnerContext get_context(ggml_cgraph* graph = nullptr);
 
     void reset_compute_ctx();
 
@@ -323,7 +332,7 @@ public:
 
     ggml_tensor* to_backend(ggml_tensor* tensor);
 
-    void cache(const std::string name, ggml_tensor* tensor);
+    void cache(const std::string name, ggml_tensor* tensor, ggml_cgraph* graph = nullptr);
 
     ggml_tensor* get_cache_tensor_by_name(const std::string& name) {
         return cache_.get(name);
