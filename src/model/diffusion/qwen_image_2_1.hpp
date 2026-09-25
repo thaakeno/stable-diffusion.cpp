@@ -305,7 +305,8 @@ namespace Qwen {
             auto fused = blocks.find("img_mlp.gate_up");
             if (fused != blocks.end()) {
                 auto fused_linear = std::dynamic_pointer_cast<Linear>(fused->second);
-                auto gate_up      = fused_linear->forward(ctx, h);
+                auto mlp_input    = h;
+                auto gate_up      = fused_linear->forward(ctx, mlp_input);
                 auto parts        = ggml_ext_chunk(ctx->ggml_ctx, gate_up, 2, 0);
                 gate              = parts[0];
                 h                 = parts[1];
@@ -331,10 +332,10 @@ namespace Qwen {
                     root.resize(root.size() - suffix.size());
                     const auto forward_params = fused_linear->adapter_forward_params();
                     gate = ctx->weight_adapter->add_lora_alias_to_output(
-                        ctx->ggml_ctx, ctx->backend, h, gate_weight, gate,
+                        ctx->ggml_ctx, ctx->backend, mlp_input, gate_weight, gate,
                         root + "gate_layer.", forward_params);
                     h = ctx->weight_adapter->add_lora_alias_to_output(
-                        ctx->ggml_ctx, ctx->backend, h, up_weight, h,
+                        ctx->ggml_ctx, ctx->backend, mlp_input, up_weight, h,
                         root + "proj.", forward_params);
                 }
             } else {
