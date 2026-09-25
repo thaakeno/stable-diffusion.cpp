@@ -1021,6 +1021,16 @@ bool ModelLoader::load_tensors(on_new_tensor_cb_t on_new_tensor_cb,
         if (tensors_to_process.empty()) {
             continue;
         }
+        // Large GGUF stages are repeatedly evicted/reloaded on mobile. Keep
+        // each file pass sequential in storage order so Android's page cache
+        // and readahead can feed the HTP upload instead of turning a 4-5 GB
+        // stage transition into scattered random reads.
+        if (!fdata.is_zip) {
+            std::stable_sort(tensors_to_process.begin(), tensors_to_process.end(),
+                             [](const TensorStorage* a, const TensorStorage* b) {
+                                 return a->offset < b->offset;
+                             });
+        }
         LOG_VERBOSE("loading %zu/%zu tensors from %s",
                     tensors_to_process.size(),
                     file_tensors.size(),
@@ -1330,7 +1340,10 @@ bool ModelLoader::load_tensor(const TensorStorage& tensor_storage, ggml_tensor* 
         return true;
     };
 
-    if (!load_tensors(on_new_tensor_cb, false, &target_tensor_names, false)) {
+    // Keep a read-only mapping of large model files for stage residency.
+    // The mapping is demand-paged/reclaimable; it does not pin a second copy of
+    // the model in RAM, and warm reloads can come straight from the page cache.
+    if (!load_tensors(on_new_tensor_cb, true, &target_tensor_names, false)) {
         LOG_ERROR("load tensor failed: '%s'", tensor_storage.name.c_str());
         return false;
     }
