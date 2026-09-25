@@ -7,6 +7,7 @@
 #include <list>
 #include <mutex>
 #include <set>
+#include <sstream>
 #include <type_traits>
 #include <unordered_set>
 #include <utility>
@@ -1682,8 +1683,30 @@ bool StableDiffusionGGML::apply_loras(const sd_lora_t* loras, uint32_t lora_coun
     int64_t t0 = ggml_time_ms();
     end_runners();
     clear_lora_adapters();
-    if (!model_manager->prepare_lora_sources(all_loras))
+    if (!model_manager->prepare_lora_sources(all_loras)) {
+        conditioning_cache_->clear();
+        conditioning_lora_key_.clear();
         return false;
+    }
+
+    // Conditioning can depend on adapters targeting the text encoder. Keep
+    // cached embeddings across repeated generations with the exact same LoRA
+    // set, but invalidate deterministically whenever a source revision,
+    // multiplier, noise role or prefix filter changes.
+    std::ostringstream lora_key_builder;
+    lora_key_builder.precision(9);
+    for (const auto& spec : all_loras) {
+        lora_key_builder << spec.file_id << ':' << spec.file_revision << ':'
+                         << spec.multiplier << ':' << spec.is_high_noise << ':'
+                         << spec.tensor_name_prefix_filter << ';';
+    }
+    const std::string next_lora_key = lora_key_builder.str();
+    if (next_lora_key != conditioning_lora_key_) {
+        conditioning_cache_->clear();
+        conditioning_lora_key_ = next_lora_key;
+        LOG_INFO("conditioning cache invalidated: LoRA configuration changed");
+    }
+
     runtime_lora_models.erase(std::remove_if(runtime_lora_models.begin(), runtime_lora_models.end(), [&](const RuntimeLora& entry) {
                                   return std::none_of(all_loras.begin(), all_loras.end(), [&](const ModelManager::LoraSpec& spec) {
                                       return entry.matches(spec);
