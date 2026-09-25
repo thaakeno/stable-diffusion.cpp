@@ -367,9 +367,16 @@ namespace Qwen {
                 }
                 joint = joint == nullptr ? h : ggml_concat(ctx->ggml_ctx, joint, h, 1);
             }
+            // Qwen is too large to treat as one opaque graph on mobile HTP.
+            // Mark stable transformer boundaries so the runner can make a real
+            // segmented residency plan instead of silently pinning everything
+            // to the primary virtual HTP session.
+            sd::ggml_graph_cut::mark_graph_cut(joint, "qwen_image_2_1.prelude", "joint");
             for (int i = 0; i < config.num_layers; ++i) {
-                auto block = std::dynamic_pointer_cast<QwenImage21TransformerBlock>(blocks["transformer_blocks." + std::to_string(i)]);
+                const std::string layer = "transformer_blocks." + std::to_string(i);
+                auto block = std::dynamic_pointer_cast<QwenImage21TransformerBlock>(blocks[layer]);
                 joint      = block->forward(ctx, joint, mod, pe, token_indices, zero_shift, layout, masks);
+                sd::ggml_graph_cut::mark_graph_cut(joint, "qwen_image_2_1." + layer, "joint");
             }
             joint      = ggml_ext_slice(ctx->ggml_ctx, joint, 1, layout.prefix_length, joint->ne[1]);
             auto scale = std::dynamic_pointer_cast<Linear>(blocks["norm_out.linear"])->forward(ctx, ggml_ext_chunk(ctx->ggml_ctx, time, 2, 1)[0]);
