@@ -204,6 +204,22 @@ public:
         force_prec_f32 = force_prec_f32_;
     }
 
+    ggml_tensor* weight_tensor() {
+        return params["weight"];
+    }
+
+    const std::string& parameter_prefix() const {
+        return prefix;
+    }
+
+    WeightAdapter::ForwardParams adapter_forward_params() const {
+        WeightAdapter::ForwardParams result;
+        result.op_type               = WeightAdapter::ForwardParams::op_type_t::OP_LINEAR;
+        result.linear.force_prec_f32 = force_prec_f32;
+        result.linear.scale          = scale;
+        return result;
+    }
+
     ggml_tensor* forward(GGMLRunnerContext* ctx, ggml_tensor* x) override {
         ggml_tensor* w            = params["weight"];
         ggml_tensor* weight_scale = has_weight_scale ? params["weight_scale"] : nullptr;

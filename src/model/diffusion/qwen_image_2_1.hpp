@@ -304,10 +304,39 @@ namespace Qwen {
             ggml_tensor* gate;
             auto fused = blocks.find("img_mlp.gate_up");
             if (fused != blocks.end()) {
-                auto gate_up = std::dynamic_pointer_cast<Linear>(fused->second)->forward(ctx, h);
-                auto parts   = ggml_ext_chunk(ctx->ggml_ctx, gate_up, 2, 0);
-                gate         = parts[0];
-                h            = parts[1];
+                auto fused_linear = std::dynamic_pointer_cast<Linear>(fused->second);
+                auto gate_up      = fused_linear->forward(ctx, h);
+                auto parts        = ggml_ext_chunk(ctx->ggml_ctx, gate_up, 2, 0);
+                gate              = parts[0];
+                h                 = parts[1];
+
+                // Qwen 2.1 quantized checkpoints store gate+up as one fused
+                // matrix, while Viggle was trained against two logical modules.
+                // Apply those logical LoRAs to the corresponding output halves
+                // instead of silently dropping gate_layer/proj updates.
+                if (ctx->weight_adapter) {
+                    ggml_tensor* fused_weight = fused_linear->weight_tensor();
+                    const int64_t half        = fused_weight->ne[1] / 2;
+                    GGML_ASSERT(half * 2 == fused_weight->ne[1]);
+                    auto gate_weight = ggml_view_2d(ctx->ggml_ctx, fused_weight,
+                                                    fused_weight->ne[0], half,
+                                                    fused_weight->nb[1], 0);
+                    auto up_weight   = ggml_view_2d(ctx->ggml_ctx, fused_weight,
+                                                    fused_weight->ne[0], half,
+                                                    fused_weight->nb[1],
+                                                    static_cast<size_t>(half) * fused_weight->nb[1]);
+                    std::string root = fused_linear->parameter_prefix();
+                    const std::string suffix = "gate_up.";
+                    GGML_ASSERT(ends_with(root, suffix));
+                    root.resize(root.size() - suffix.size());
+                    const auto forward_params = fused_linear->adapter_forward_params();
+                    gate = ctx->weight_adapter->add_lora_alias_to_output(
+                        ctx->ggml_ctx, ctx->backend, h, gate_weight, gate,
+                        root + "gate_layer.", forward_params);
+                    h = ctx->weight_adapter->add_lora_alias_to_output(
+                        ctx->ggml_ctx, ctx->backend, h, up_weight, h,
+                        root + "proj.", forward_params);
+                }
             } else {
                 gate = std::dynamic_pointer_cast<Linear>(blocks["img_mlp.gate_layer"])->forward(ctx, h);
                 h    = std::dynamic_pointer_cast<Linear>(blocks["img_mlp.proj"])->forward(ctx, h);
@@ -472,7 +501,14 @@ namespace Qwen {
                 ggml_build_forward_expand(graph, out);
                 return graph;
             };
-            return restore_trailing_singleton_dims(GGMLRunner::compute(build, n_threads, false), x.dim());
+            auto result = restore_trailing_singleton_dims(
+                GGMLRunner::compute(build, n_threads, false), x.dim());
+            if (!result.empty() && weight_adapter && !weight_adapter->all_tensors_applied()) {
+                LOG_ERROR("Qwen Image 2.1 runtime LoRA is incomplete: %zu compatible tensors were not applied",
+                          weight_adapter->unapplied_tensor_count());
+                return {};
+            }
+            return result;
         }
     };
 }

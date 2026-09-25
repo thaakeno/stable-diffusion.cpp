@@ -953,6 +953,24 @@ struct LoraModel : public GGMLRunner {
         return apply(model_tensors, tensor_names(model_tensors), version, n_threads, warn_unused);
     }
 
+    size_t applied_tensor_count() const {
+        return applied_lora_tensors.size();
+    }
+
+    size_t compatible_tensor_count() const {
+        return lora_tensors.size() - skipped_incompatible_lora_tensors.size();
+    }
+
+    size_t unapplied_tensor_count() const {
+        const size_t compatible = compatible_tensor_count();
+        return compatible > applied_lora_tensors.size() ? compatible - applied_lora_tensors.size() : 0;
+    }
+
+    bool fully_applied() const {
+        return skipped_incompatible_lora_tensors.empty() &&
+               applied_lora_tensors.size() == lora_tensors.size();
+    }
+
     void stat(bool at_runntime = false) {
         size_t total_lora_tensors_count   = 0;
         size_t applied_lora_tensors_count = 0;
@@ -1083,6 +1101,39 @@ public:
             }
         }
         return output;
+    }
+
+    ggml_tensor* add_lora_alias_to_output(ggml_context* ctx,
+                                           ggml_backend_t backend,
+                                           ggml_tensor* x,
+                                           ggml_tensor* logical_weight,
+                                           ggml_tensor* output,
+                                           const std::string& logical_prefix,
+                                           WeightAdapter::ForwardParams forward_params) override {
+        for (auto& lora_model : lora_models) {
+            ggml_tensor* out_diff =
+                lora_model->get_out_diff(ctx, backend, x, logical_weight,
+                                         forward_params, logical_prefix + "weight");
+            if (out_diff != nullptr) {
+                output = ggml_add_inplace(ctx, output, out_diff);
+            }
+        }
+        return output;
+    }
+
+    bool all_tensors_applied() const override {
+        return std::all_of(lora_models.begin(), lora_models.end(),
+                           [](const std::shared_ptr<LoraModel>& model) {
+                               return model == nullptr || model->fully_applied();
+                           });
+    }
+
+    size_t unapplied_tensor_count() const override {
+        size_t count = 0;
+        for (const auto& model : lora_models) {
+            if (model) count += model->unapplied_tensor_count();
+        }
+        return count;
     }
 
     size_t get_extra_graph_size() override {

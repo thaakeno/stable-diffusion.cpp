@@ -61,6 +61,20 @@ struct WeightAdapter {
                                             ggml_tensor* output,
                                             const std::string& prefix,
                                             ForwardParams forward_params)                                                             = 0;
+    // Some model formats fuse multiple trained linear projections into one
+    // storage tensor. This hook applies a LoRA by its logical (training-time)
+    // alias while using a view only for output-shape validation.
+    virtual ggml_tensor* add_lora_alias_to_output(ggml_context* ctx,
+                                                   ggml_backend_t backend,
+                                                   ggml_tensor* x,
+                                                   ggml_tensor* logical_weight,
+                                                   ggml_tensor* output,
+                                                   const std::string& logical_prefix,
+                                                   ForwardParams forward_params) {
+        return output;
+    }
+    virtual bool all_tensors_applied() const { return true; }
+    virtual size_t unapplied_tensor_count() const { return 0; }
     virtual size_t get_extra_graph_size()                                                                                             = 0;
 };
 
