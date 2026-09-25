@@ -1192,7 +1192,6 @@ bool ModelLoader::load_tensors(on_new_tensor_cb_t on_new_tensor_cb,
                     char* read_buf    = nullptr;
                     char* target_buf  = nullptr;
                     char* convert_buf = nullptr;
-                    bool direct_mmap_source = false;
                     if (dst_tensor->buffer == nullptr || ggml_backend_buffer_is_host(dst_tensor->buffer)) {
                         if (tensor_storage.type == dst_tensor->type) {
                             GGML_ASSERT(ggml_nbytes(dst_tensor) == tensor_storage.nbytes());
@@ -1210,48 +1209,23 @@ bool ModelLoader::load_tensors(on_new_tensor_cb_t on_new_tensor_cb,
                             convert_buf = (char*)dst_tensor->data;
                         }
                     } else {
-                        // For an mmap-backed model with an identical source/
-                        // destination dtype, upload straight from the mapped
-                        // file pages into the accelerator. Avoiding a second
-                        // per-worker tensor-sized heap buffer is important on
-                        // Android: Qwen has very large tensors and four loader
-                        // workers could otherwise transiently duplicate
-                        // hundreds of MB while the HTP copy is already in
-                        // flight.
-                        if (mmapped && fdata.mmbuffer &&
-                            tensor_storage.type == dst_tensor->type &&
-                            !tensor_storage.is_f64 && !tensor_storage.is_i64) {
-                            auto* mmap_base = static_cast<uint8_t*>(
-                                ggml_backend_buffer_get_base(fdata.mmbuffer.get()));
-                            if (mmap_base != nullptr) {
-                                read_buf = reinterpret_cast<char*>(
-                                    mmap_base + tensor_storage.offset);
-                                target_buf = read_buf;
-                                direct_mmap_source = true;
-                            }
-                        }
+                        read_buffer.resize(std::max(tensor_storage.nbytes(), tensor_storage.nbytes_to_read()));
+                        read_buf   = (char*)read_buffer.data();
+                        target_buf = read_buf;
 
-                        if (!direct_mmap_source) {
-                            read_buffer.resize(std::max(tensor_storage.nbytes(), tensor_storage.nbytes_to_read()));
-                            read_buf   = (char*)read_buffer.data();
-                            target_buf = read_buf;
-
-                            if (tensor_storage.type != dst_tensor->type) {
-                                convert_buffer.resize(ggml_nbytes(dst_tensor));
-                                convert_buf = (char*)convert_buffer.data();
-                            }
+                        if (tensor_storage.type != dst_tensor->type) {
+                            convert_buffer.resize(ggml_nbytes(dst_tensor));
+                            convert_buf = (char*)convert_buffer.data();
                         }
                     }
 
                     t0 = ggml_time_ms();
-                    if (!direct_mmap_source && !read_data(read_buf, nbytes_to_read)) {
+                    if (!read_data(read_buf, nbytes_to_read)) {
                         failed = true;
                         break;
                     }
                     t1 = ggml_time_ms();
-                    if (!direct_mmap_source) {
-                        read_time_ms.fetch_add(t1 - t0);
-                    }
+                    read_time_ms.fetch_add(t1 - t0);
 
                     t0 = ggml_time_ms();
                     if (tensor_storage.is_f64) {
