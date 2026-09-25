@@ -457,6 +457,12 @@ enum sd_generation_phase_t {
     SD_PHASE_COUNT,
 };
 
+typedef struct {
+    int count;
+    int max_length;       // 0 means no frontend-enforced prompt limit
+    int overflow_offset;  // -1 when not truncated
+} sd_tokenize_result_t;
+
 typedef void (*sd_log_cb_t)(enum sd_log_level_t level, const char* text, void* data);
 typedef void (*sd_progress_cb_t)(int step, int steps, float time, void* data);
 typedef void (*sd_phase_cb_t)(enum sd_generation_phase_t phase, void* data);
@@ -513,6 +519,7 @@ SD_API char* sd_sample_params_to_str(const sd_sample_params_t* sample_params);
 
 // Requires a loaded context; returns a static string owned by the library, or "Unknown".
 SD_API const char* sd_get_model_version_name(const sd_ctx_t* sd_ctx);
+SD_API bool sd_tokenize_text(sd_ctx_t* sd_ctx, const char* text, sd_tokenize_result_t* result);
 
 SD_API enum sample_method_t sd_get_default_sample_method(const sd_ctx_t* sd_ctx);
 SD_API enum scheduler_t sd_get_default_scheduler(const sd_ctx_t* sd_ctx, enum sample_method_t sample_method);

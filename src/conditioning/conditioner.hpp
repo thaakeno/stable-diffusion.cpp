@@ -150,6 +150,11 @@ public:
     virtual void get_layer_split_param_tensors(std::map<std::string, ggml_tensor*>& tensors) {}
     virtual void set_flash_attention_enabled(bool enabled) = 0;
     virtual void set_weight_adapter(const std::shared_ptr<WeightAdapter>& adapter) {}
+    virtual bool tokenize_info(const std::string& text, sd_tokenize_result_t* result) {
+        SD_UNUSED(text);
+        SD_UNUSED(result);
+        return false;
+    }
     virtual void runner_end() {}
 };
 
@@ -1893,6 +1898,20 @@ struct LLMEmbedder : public Conditioner {
         if (byt5) {
             byt5->runner_end();
         }
+    }
+
+    bool tokenize_info(const std::string& text, sd_tokenize_result_t* result) override {
+        if (result == nullptr || tokenizer == nullptr) {
+            return false;
+        }
+        // Use the exact tokenizer + prompt-attention parsing path that the
+        // conditioner uses for the user portion of the prompt. Hidden Qwen
+        // system/assistant wrapper tokens are intentionally not counted.
+        auto encoded = tokenize(text, {0, static_cast<int>(text.size())});
+        result->count = static_cast<int>(std::get<0>(encoded).size());
+        result->max_length = 0;
+        result->overflow_offset = -1;
+        return true;
     }
 
     std::tuple<std::vector<int>, std::vector<float>, std::vector<float>> tokenize(std::string text,

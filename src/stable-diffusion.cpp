@@ -7,6 +7,7 @@
 
 #include "core/ggml_extend.h"
 #include "core/util.h"
+#include "conditioning/conditioner.hpp"
 #include "pipeline/diffusion_engine.h"
 #include "pipeline/generation.h"
 #include "pipeline/request.h"
@@ -706,6 +707,15 @@ const char* sd_get_model_version_name(const sd_ctx_t* sd_ctx) {
         return "Unknown";
     }
     return model_version_to_str[sd_ctx->sd->version];
+}
+
+bool sd_tokenize_text(sd_ctx_t* sd_ctx, const char* text, sd_tokenize_result_t* result) {
+    if (result != nullptr) *result = {0, 0, -1};
+    if (sd_ctx == nullptr || sd_ctx->sd == nullptr || sd_ctx->sd->cond_stage_model == nullptr ||
+        text == nullptr || result == nullptr) {
+        return false;
+    }
+    return sd_ctx->sd->cond_stage_model->tokenize_info(text, result);
 }
 
 enum sample_method_t sd_get_default_sample_method(const sd_ctx_t* sd_ctx) {
