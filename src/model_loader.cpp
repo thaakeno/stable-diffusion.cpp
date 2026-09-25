@@ -799,6 +799,27 @@ void ModelLoader::set_wtype_override(ggml_type wtype, std::string tensor_type_ru
 
 void ModelLoader::process_model_files(bool enable_mmap, bool writable_mmap) {
     if (model_files_processed) {
+        // Metadata parsing commonly initializes file_data before the residency
+        // manager decides to stream parameters. Upgrade those existing entries
+        // to read-only mappings lazily instead of permanently falling back to
+        // read()/seek() for every stage reload.
+        if (enable_mmap) {
+            for (auto& fdata : file_data) {
+                if (fdata.is_zip || fdata.mmapped) continue;
+                std::unique_ptr<MmapWrapper> mmapped =
+                    MmapWrapper::create(fdata.path, writable_mmap);
+                if (!mmapped) continue;
+                uint8_t* mmap_data = static_cast<uint8_t*>(mmapped->writable_data());
+                ggml_backend_buffer_t buf_mmap =
+                    ggml_backend_cpu_buffer_from_ptr(mmap_data, mmapped->size());
+                if (buf_mmap) {
+                    fdata.mmbuffer = std::shared_ptr<struct ggml_backend_buffer>(
+                        buf_mmap, ggml_backend_buffer_free);
+                }
+                fdata.mmapped = std::shared_ptr<MmapWrapper>(std::move(mmapped));
+                LOG_VERBOSE("upgraded '%s' to mmap-backed streaming", fdata.path.c_str());
+            }
+        }
         return;
     }
 
