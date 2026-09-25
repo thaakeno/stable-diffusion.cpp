@@ -29,6 +29,7 @@
 #include "stable-diffusion.h"
 
 #include "conditioning/conditioner.hpp"
+#include "conditioning/conditioning_cache.h"
 #include "core/backend_fit.h"
 #include "extensions/generation_extension.h"
 #include "model/adapter/ip_adapter.hpp"
@@ -130,6 +131,7 @@ static_assert(std::atomic<sd_cancel_mode_t>::is_always_lock_free,
 
 StableDiffusionGGML::StableDiffusionGGML()
     : rng(std::make_shared<PhiloxRNG>()),
+      conditioning_cache_(std::make_unique<ConditioningCache>()),
       denoiser(std::make_shared<CompVisDenoiser>()) {}
 
 StableDiffusionGGML::~StableDiffusionGGML() = default;
@@ -199,6 +201,11 @@ void StableDiffusionGGML::end_runners() {
 }
 
 bool StableDiffusionGGML::reset_runners(const RunnerGroups& groups) {
+    // Cached host conditioning is tied to the current conditioner weights.
+    if (groups.count(RunnerGroup::Core) != 0) {
+        conditioning_cache_->clear();
+        conditioning_lora_key_.clear();
+    }
     end_runners();
     clear_lora_adapters();
     runtime_lora_models.clear();
@@ -847,6 +854,11 @@ bool StableDiffusionGGML::init_model_loader(ModelLoader& model_loader, ModelConf
 }
 
 bool StableDiffusionGGML::init(const sd_ctx_params_t* sd_ctx_params) {
+    if (sd_ctx_params->conditioning_cache_size < 0) {
+        LOG_ERROR("conditioning_cache_size must be non-negative");
+        return false;
+    }
+    conditioning_cache_->set_capacity(static_cast<size_t>(sd_ctx_params->conditioning_cache_size));
     auto configuration        = std::make_unique<ModelConfig>(*sd_ctx_params);
     n_threads                 = sd_ctx_params->n_threads;
     enable_mmap               = sd_ctx_params->enable_mmap;
@@ -1691,6 +1703,10 @@ bool StableDiffusionGGML::apply_loras(const sd_lora_t* loras, uint32_t lora_coun
         LOG_INFO("apply_loras completed, taking %.2fs", (t1 - t0) * 1.0f / 1000);
     }
     return true;
+}
+
+SDCondition StableDiffusionGGML::get_learned_condition(const ConditionerParams& params) {
+    return conditioning_cache_->get(*cond_stage_model, n_threads, params);
 }
 
 void StableDiffusionGGML::reset_generation_extensions() {

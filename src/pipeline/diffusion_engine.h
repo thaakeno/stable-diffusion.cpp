@@ -25,6 +25,7 @@ class RNG;
 struct Denoiser;
 struct LoraModel;
 struct ConditionerParams;
+class ConditioningCache;
 struct SDCondition;
 struct RefImageParams;
 
@@ -171,6 +172,8 @@ public:
     std::recursive_mutex execution_mutex;
     std::unique_ptr<ModelConfig> config_;
     RunnerState runner_state_;
+    std::unique_ptr<ConditioningCache> conditioning_cache_;
+    std::string conditioning_lora_key_;
     bool executing_ = false;
 
     std::shared_ptr<Denoiser> denoiser;
@@ -350,6 +353,8 @@ public:
     void lora_stat();
 
     bool apply_loras(const sd_lora_t* loras, uint32_t lora_count);
+
+    SDCondition get_learned_condition(const ConditionerParams& params);
 
     void reset_generation_extensions();
 

@@ -217,6 +217,7 @@ typedef struct {
     const char* pulid_weights_path;
     const char* tensor_type_rules;
     int n_threads;
+    int conditioning_cache_size;  // Exact conditioning LRU entries per context; 0 disables (default: 4)
     enum sd_type_t wtype;
     enum rng_type_t rng_type;
     enum rng_type_t sampler_rng_type;

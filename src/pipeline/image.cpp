@@ -440,8 +440,7 @@ namespace sd::pipeline {
         sd->compute_ip_adapter_tokens(sd_img_gen_params->ip_adapter_image, sd_img_gen_params->ip_adapter_strength);
         int64_t prepare_start_ms         = ggml_time_ms();
         condition_params.zero_out_masked = false;
-        auto cond                        = sd->cond_stage_model->get_learned_condition(sd->n_threads,
-                                                                                       condition_params);
+        auto cond                        = sd->get_learned_condition(condition_params);
         if (cond.c_concat.empty() && ref_image_params.pass_to_dit) {
             cond.c_concat = latents->concat_latent;  // TODO: optimize
         }
@@ -468,8 +467,7 @@ namespace sd::pipeline {
                 }
                 condition_params.text            = request->negative_prompt;
                 condition_params.zero_out_masked = zero_out_masked;
-                uncond                           = sd->cond_stage_model->get_learned_condition(sd->n_threads,
-                                                                                               condition_params);
+                uncond                           = sd->get_learned_condition(condition_params);
             }
             if (uncond.c_concat.empty() && ref_image_params.pass_to_dit) {
                 uncond.c_concat = latents->concat_latent;  // TODO: optimize
@@ -493,8 +491,7 @@ namespace sd::pipeline {
                 if (use_ref_latent_img_cfg) {
                     condition_params.ref_images = &empty_ref_images;
                 }
-                img_uncond = sd->cond_stage_model->get_learned_condition(sd->n_threads,
-                                                                         condition_params);
+                img_uncond = sd->get_learned_condition(condition_params);
                 if (img_uncond.c_concat.empty() && ref_image_params.pass_to_dit) {
                     img_uncond.c_concat = latents->img_uncond_concat_latent;  // TODO: optimize
                 }
