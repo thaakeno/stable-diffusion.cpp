@@ -458,6 +458,14 @@ enum sd_generation_phase_t {
     SD_PHASE_COUNT,
 };
 
+// Distinguish sampler progress from model-loading byte/tensor progress.
+enum sd_progress_kind_t {
+    SD_PROGRESS_SAMPLING = 0,
+    SD_PROGRESS_MODEL_LOADING,
+    SD_PROGRESS_OTHER,
+    SD_PROGRESS_KIND_COUNT,
+};
+
 typedef struct {
     int count;
     int max_length;       // 0 means no frontend-enforced prompt limit
@@ -466,12 +474,14 @@ typedef struct {
 
 typedef void (*sd_log_cb_t)(enum sd_log_level_t level, const char* text, void* data);
 typedef void (*sd_progress_cb_t)(int step, int steps, float time, void* data);
+typedef void (*sd_progress_event_cb_t)(enum sd_progress_kind_t kind, int step, int steps, float time, void* data);
 typedef void (*sd_phase_cb_t)(enum sd_generation_phase_t phase, void* data);
 typedef void (*sd_preview_cb_t)(int step, int frame_count, sd_image_t* frames, bool is_noisy, void* data);
 typedef bool (*sd_graph_eval_callback_t)(struct ggml_tensor* t, bool ask, void* user_data);
 
 SD_API void sd_set_log_callback(sd_log_cb_t sd_log_cb, void* data);
 SD_API void sd_set_progress_callback(sd_progress_cb_t cb, void* data);
+SD_API void sd_set_progress_event_callback(sd_progress_event_cb_t cb, void* data);
 SD_API void sd_set_phase_callback(sd_phase_cb_t cb, void* data);
 // In each sampling pass, a positive interval previews every Nth denoiser step, while a
 // negative interval previews only completed logical step -interval. Zero previews the final

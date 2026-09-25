@@ -342,6 +342,8 @@ int32_t sd_get_num_physical_cores() {
 
 static sd_progress_cb_t sd_progress_cb = nullptr;
 void* sd_progress_cb_data              = nullptr;
+static sd_progress_event_cb_t sd_progress_event_cb = nullptr;
+void* sd_progress_event_cb_data                    = nullptr;
 static sd_phase_cb_t sd_phase_cb       = nullptr;
 void* sd_phase_cb_data                 = nullptr;
 
@@ -537,6 +539,10 @@ static void print_progress_line(int step, int steps, const std::string& speed_te
 }
 
 void pretty_progress(int step, int steps, float time) {
+    if (sd_progress_event_cb) {
+        sd_progress_event_cb(SD_PROGRESS_SAMPLING, step, steps, time, sd_progress_event_cb_data);
+        return;
+    }
     if (sd_progress_cb) {
         sd_progress_cb(step, steps, time, sd_progress_cb_data);
         return;
@@ -554,8 +560,12 @@ void pretty_progress(int step, int steps, float time) {
 }
 
 void pretty_bytes_progress(int step, int steps, uint64_t bytes_processed, float elapsed_seconds) {
+    const float time = elapsed_seconds / (step + 1e-6f);
+    if (sd_progress_event_cb) {
+        sd_progress_event_cb(SD_PROGRESS_MODEL_LOADING, step, steps, time, sd_progress_event_cb_data);
+        return;
+    }
     if (sd_progress_cb) {
-        float time = elapsed_seconds / (step + 1e-6f);
         sd_progress_cb(step, steps, time, sd_progress_cb_data);
         return;
     }
@@ -647,6 +657,10 @@ void sd_set_log_callback(sd_log_cb_t cb, void* data) {
 void sd_set_progress_callback(sd_progress_cb_t cb, void* data) {
     sd_progress_cb      = cb;
     sd_progress_cb_data = data;
+}
+void sd_set_progress_event_callback(sd_progress_event_cb_t cb, void* data) {
+    sd_progress_event_cb      = cb;
+    sd_progress_event_cb_data = data;
 }
 void sd_set_phase_callback(sd_phase_cb_t cb, void* data) {
     sd_phase_cb      = cb;
