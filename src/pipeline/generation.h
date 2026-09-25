@@ -42,8 +42,9 @@ namespace sd::pipeline {
 
     struct ConditionerRunnerEndOnExit {
         Conditioner* conditioner = nullptr;
+        bool release = true;
         ~ConditionerRunnerEndOnExit() {
-            if (conditioner != nullptr) {
+            if (release && conditioner != nullptr) {
                 conditioner->runner_end();
             }
         }

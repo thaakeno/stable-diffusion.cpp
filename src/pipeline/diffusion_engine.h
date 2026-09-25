@@ -95,6 +95,7 @@ public:
     std::string params_backend_spec;
     std::string split_mode_spec;
     bool auto_fit_enabled = false;
+    bool keep_conditioner_resident = false;
 
     bool diffusion_conv_direct = false;
 

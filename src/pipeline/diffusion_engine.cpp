@@ -862,6 +862,7 @@ bool StableDiffusionGGML::init(const sd_ctx_params_t* sd_ctx_params) {
     conditioning_cache_->set_capacity(static_cast<size_t>(sd_ctx_params->conditioning_cache_size));
     auto configuration        = std::make_unique<ModelConfig>(*sd_ctx_params);
     n_threads                 = sd_ctx_params->n_threads;
+    keep_conditioner_resident = sd_ctx_params->keep_conditioner_resident;
     enable_mmap               = sd_ctx_params->enable_mmap;
     disable_prefetch          = sd_ctx_params->disable_prefetch;
     disable_segmented_compute = sd_ctx_params->disable_segmented_compute;

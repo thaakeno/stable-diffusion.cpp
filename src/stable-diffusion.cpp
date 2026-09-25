@@ -313,6 +313,7 @@ void sd_ctx_params_init(sd_ctx_params_t* sd_ctx_params) {
     *sd_ctx_params                           = {};
     sd_ctx_params->n_threads                 = sd_get_num_physical_cores();
     sd_ctx_params->conditioning_cache_size    = 4;
+    sd_ctx_params->keep_conditioner_resident   = false;
     sd_ctx_params->wtype                     = SD_TYPE_COUNT;
     sd_ctx_params->rng_type                  = CUDA_RNG;
     sd_ctx_params->sampler_rng_type          = RNG_TYPE_COUNT;
@@ -361,6 +362,7 @@ char* sd_ctx_params_to_str(const sd_ctx_params_t* sd_ctx_params) {
              "tensor_type_rules: %s\n"
              "n_threads: %d\n"
              "conditioning_cache_size: %d\n"
+             "keep_conditioner_resident: %s\n"
              "wtype: %s\n"
              "rng_type: %s\n"
              "sampler_rng_type: %s\n"
@@ -397,6 +399,7 @@ char* sd_ctx_params_to_str(const sd_ctx_params_t* sd_ctx_params) {
              SAFE_STR(sd_ctx_params->tensor_type_rules),
              sd_ctx_params->n_threads,
              sd_ctx_params->conditioning_cache_size,
+             BOOL_STR(sd_ctx_params->keep_conditioner_resident),
              sd_type_name(sd_ctx_params->wtype),
              sd_rng_type_name(sd_ctx_params->rng_type),
              sd_rng_type_name(sd_ctx_params->sampler_rng_type),
