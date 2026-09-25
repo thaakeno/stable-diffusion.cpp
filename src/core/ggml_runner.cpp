@@ -755,7 +755,26 @@ bool GGMLRunner::execute_segment(ggml_cgraph* graph, int n_threads) {
             LOG_WARN("%s: eval callback is not supported with the backend scheduler; ignoring", get_desc().c_str());
             multi_device_eval_callback_warned = true;
         }
-        status = ggml_backend_sched_graph_compute(scheduler, graph);
+
+        // Hexagon virtual sessions share the same physical NPU but still use
+        // GGML's multi-backend scheduler. Upstream has a known failure mode
+        // where a large graph split across HTP sessions can finish cleanly yet
+        // consume stale cross-split data and produce garbage output. Force the
+        // scheduler down its synchronized split path for multi-device runs:
+        // a callback that never requests a tensor still computes each whole
+        // split at once, but ggml_backend_sched synchronizes that backend
+        // before moving to the next split. Single-device execution keeps the
+        // normal fast path.
+        if (is_multi_device()) {
+            const auto split_barrier = [](ggml_tensor*, bool, void*) -> bool {
+                return false;
+            };
+            ggml_backend_sched_set_eval_callback(scheduler, split_barrier, nullptr);
+            status = ggml_backend_sched_graph_compute(scheduler, graph);
+            ggml_backend_sched_set_eval_callback(scheduler, nullptr, nullptr);
+        } else {
+            status = ggml_backend_sched_graph_compute(scheduler, graph);
+        }
     } else {
         status = sd_backend_graph_compute_with_eval_callback(runtime_backend, graph,
                                                              sd_get_backend_eval_callback(),
