@@ -151,11 +151,63 @@ namespace sd {
             return param_assignments.count(param) != 0;
         });
 
+        std::vector<int64_t> backend_targets(split_backends.size(), 0);
+        if (!reuse_assignments) {
+            int64_t total_capacity = 0;
+            for (int64_t capacity : backend_capacities) {
+                total_capacity += std::max<int64_t>(capacity, 0);
+            }
+            if (total_capacity < total_param_bytes) {
+                LOG_ERROR("%s graph-cut layer split: %.1f MB of weights exceed %.1f MB combined backend capacity",
+                          desc,
+                          total_param_bytes / (1024.0 * 1024.0),
+                          total_capacity / (1024.0 * 1024.0));
+                return false;
+            }
+
+            // Split by proportional capacity instead of first-filling the
+            // primary device. This matters for virtual Hexagon sessions:
+            // each session exposes an independent VA window, but both often
+            // report enough shared DDR for the entire model. First-fit would
+            // therefore leave HTP0:1 completely idle.
+            int64_t remaining_bytes = total_param_bytes;
+            int64_t remaining_capacity = total_capacity;
+            for (size_t i = 0; i < split_backends.size(); ++i) {
+                if (i + 1 == split_backends.size()) {
+                    backend_targets[i] = remaining_bytes;
+                } else if (remaining_capacity > 0) {
+                    const long double share =
+                        static_cast<long double>(remaining_bytes) *
+                        static_cast<long double>(std::max<int64_t>(backend_capacities[i], 0)) /
+                        static_cast<long double>(remaining_capacity);
+                    backend_targets[i] =
+                        std::min<int64_t>(backend_capacities[i],
+                                          std::max<int64_t>(0, static_cast<int64_t>(share)));
+                }
+                remaining_bytes -= backend_targets[i];
+                remaining_capacity -= std::max<int64_t>(backend_capacities[i], 0);
+                LOG_INFO("%s graph-cut layer split target: %s %.1f MB (capacity %.1f MB)",
+                         desc,
+                         layer_split_backend_device_display_name(split_backends[i]).c_str(),
+                         backend_targets[i] / (1024.0 * 1024.0),
+                         backend_capacities[i] / (1024.0 * 1024.0));
+            }
+        }
+
         std::vector<ggml_backend_t> backend_by_segment(plan.segments.size(), split_backends[0]);
         size_t current_backend = 0;
         int64_t current_used   = 0;
         for (size_t seg_idx = 0; seg_idx < plan.segments.size(); seg_idx++) {
             int64_t bytes = segment_param_bytes[seg_idx];
+
+            // Keep contiguous block ranges, but advance close to the
+            // proportional target rather than only after a hard OOM.
+            if (!reuse_assignments && current_backend + 1 < split_backends.size() &&
+                bytes > 0 && current_used > 0 &&
+                current_used + bytes > backend_targets[current_backend]) {
+                current_backend++;
+                current_used = 0;
+            }
             while (!reuse_assignments && current_backend + 1 < split_backends.size() &&
                    bytes > 0 &&
                    current_used + bytes > backend_capacities[current_backend]) {
