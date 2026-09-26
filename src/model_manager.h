@@ -32,10 +32,6 @@ public:
 
 private:
     static constexpr size_t MAX_RESIDENCY_BLOCK_BYTES = 64ULL * 1024ULL * 1024ULL;
-    // Reuse a small number of already-mapped accelerator buffers between
-    // Qwen3-VL -> DiT -> VAE stages. Keep this deliberately bounded; the cache
-    // is latency-only and is never counted as free capacity.
-    static constexpr size_t MAX_REUSABLE_DEVICE_BUFFER_BYTES = 256ULL * 1024ULL * 1024ULL;
 
     struct TensorState {
         std::string name;
@@ -88,12 +84,6 @@ private:
         size_t resident_bytes          = 0;
     };
 
-    struct ReusableDeviceBuffer {
-        ggml_backend_buffer_type_t buffer_type = nullptr;
-        ggml_backend_buffer_t buffer            = nullptr;
-        size_t size                             = 0;
-    };
-
     ModelLoader model_loader_;
     std::vector<std::unique_ptr<TensorState>> tensor_states_;
     std::map<const ggml_tensor*, TensorState*> tensor_states_by_tensor_;
@@ -105,8 +95,6 @@ private:
     std::map<ggml_backend_t, ggml_backend_t> prefetch_backends_;
     std::map<std::pair<uintptr_t, ggml_backend_t>, RuntimeResidency> runtime_residencies_;
     std::map<uintptr_t, std::function<bool()>> workspace_reclaimers_;
-    std::vector<ReusableDeviceBuffer> reusable_device_buffers_;
-    size_t reusable_device_buffer_bytes_ = 0;
     bool warned_split_lora_skip_ = false;
     std::set<std::string> common_ignore_tensors_;
     std::vector<LoraSpec> loras_;
@@ -172,10 +160,6 @@ private:
                                        const std::unordered_set<TensorState*>* target_states = nullptr);
     void free_compute_staging_block(ComputeStagingBlock& block);
     void free_params_storage_block(ParamsStorageBlock& block);
-    ggml_backend_buffer_t acquire_reusable_device_buffer(ggml_backend_buffer_type_t buffer_type,
-                                                         size_t requested_size);
-    void recycle_reusable_device_buffer(ggml_backend_buffer_t buffer);
-    void release_reusable_device_buffers(ggml_backend_t compute_backend = nullptr);
     void erase_params_storage_block(ParamsStorageBlock* block);
     void reset_lora_applied_params();
     bool unregister_tensor_states(const std::unordered_set<TensorState*>& states, size_t* size);

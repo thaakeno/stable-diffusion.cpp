@@ -826,89 +826,6 @@ bool ModelManager::can_mmap_storage(const TensorState& state) const {
            backend_supports_host_buffer(state.compute_backend);
 }
 
-ggml_backend_buffer_t ModelManager::acquire_reusable_device_buffer(
-    ggml_backend_buffer_type_t buffer_type,
-    size_t requested_size) {
-    if (buffer_type == nullptr || ggml_backend_buft_is_host(buffer_type)) {
-        return buffer_type != nullptr ? ggml_backend_buft_alloc_buffer(buffer_type, requested_size)
-                                      : nullptr;
-    }
-
-    auto best = reusable_device_buffers_.end();
-    for (auto it = reusable_device_buffers_.begin(); it != reusable_device_buffers_.end(); ++it) {
-        if (it->buffer_type != buffer_type || it->buffer == nullptr || it->size < requested_size) {
-            continue;
-        }
-        if (best == reusable_device_buffers_.end() || it->size < best->size) {
-            best = it;
-        }
-    }
-
-    if (best != reusable_device_buffers_.end()) {
-        ggml_backend_buffer_t buffer = best->buffer;
-        const size_t size            = best->size;
-        reusable_device_buffer_bytes_ =
-            size > reusable_device_buffer_bytes_ ? 0 : reusable_device_buffer_bytes_ - size;
-        reusable_device_buffers_.erase(best);
-        LOG_INFO("model manager reused mapped accelerator buffer (%6.2f MB for %6.2f MB, %s)",
-                 size / (1024.f * 1024.f),
-                 requested_size / (1024.f * 1024.f),
-                 ggml_backend_buft_name(buffer_type));
-        return buffer;
-    }
-
-    return ggml_backend_buft_alloc_buffer(buffer_type, requested_size);
-}
-
-void ModelManager::recycle_reusable_device_buffer(ggml_backend_buffer_t buffer) {
-    if (buffer == nullptr) {
-        return;
-    }
-    ggml_backend_buffer_type_t buffer_type = ggml_backend_buffer_get_type(buffer);
-    const size_t size                      = ggml_backend_buffer_get_size(buffer);
-    if (buffer_type == nullptr || ggml_backend_buft_is_host(buffer_type) ||
-        size == 0 || size > MAX_REUSABLE_DEVICE_BUFFER_BYTES ||
-        reusable_device_buffer_bytes_ > MAX_REUSABLE_DEVICE_BUFFER_BYTES - size) {
-        ggml_backend_buffer_free(buffer);
-        return;
-    }
-
-    reusable_device_buffers_.push_back({buffer_type, buffer, size});
-    reusable_device_buffer_bytes_ += size;
-    LOG_INFO("model manager cached mapped accelerator buffer (%6.2f MB, pool %6.2f MB, %s)",
-             size / (1024.f * 1024.f),
-             reusable_device_buffer_bytes_ / (1024.f * 1024.f),
-             ggml_backend_buft_name(buffer_type));
-}
-
-void ModelManager::release_reusable_device_buffers(ggml_backend_t compute_backend) {
-    ggml_backend_dev_t target_device =
-        compute_backend != nullptr ? ggml_backend_get_device(compute_backend) : nullptr;
-    size_t released = 0;
-    for (auto it = reusable_device_buffers_.begin(); it != reusable_device_buffers_.end();) {
-        ggml_backend_dev_t buffer_device =
-            it->buffer_type != nullptr ? ggml_backend_buft_get_device(it->buffer_type) : nullptr;
-        const bool matches = compute_backend == nullptr ||
-                             (target_device != nullptr && buffer_device == target_device);
-        if (!matches) {
-            ++it;
-            continue;
-        }
-
-        if (it->buffer != nullptr) {
-            ggml_backend_buffer_free(it->buffer);
-        }
-        released += it->size;
-        reusable_device_buffer_bytes_ =
-            it->size > reusable_device_buffer_bytes_ ? 0 : reusable_device_buffer_bytes_ - it->size;
-        it = reusable_device_buffers_.erase(it);
-    }
-    if (released > 0) {
-        LOG_INFO("model manager dropped %.2f MB mapped-buffer cache for capacity",
-                 released / (1024.f * 1024.f));
-    }
-}
-
 bool ModelManager::alloc_params_buffers(const std::vector<TensorState*>& states,
                                         std::vector<ParamsStorageBlock*>& created_storage_blocks) {
     std::map<std::pair<ggml_backend_buffer_type_t, int>, std::vector<TensorState*>> states_by_buffer_type;
@@ -938,7 +855,7 @@ bool ModelManager::alloc_params_buffers(const std::vector<TensorState*>& states,
                 return true;
             }
 
-            ggml_backend_buffer_t buffer = acquire_reusable_device_buffer(params_buft, chunk_size);
+            ggml_backend_buffer_t buffer = ggml_backend_buft_alloc_buffer(params_buft, chunk_size);
             if (buffer == nullptr) {
                 LOG_ERROR("model manager alloc params backend buffer failed, size = %.2fMB",
                           chunk_size / (1024.0 * 1024.0));
@@ -1118,15 +1035,8 @@ void ModelManager::free_compute_staging_block(ComputeStagingBlock& block) {
     }
 
     if (block.buffer != nullptr) {
-        ggml_backend_buffer_t buffer = block.buffer;
+        ggml_backend_buffer_free(block.buffer);
         block.buffer = nullptr;
-        // Hexagon executes asynchronously internally. Do not put a mapped
-        // buffer back into the stage cache until all work on this backend has
-        // crossed a hard synchronization point.
-        if (block.compute_backend != nullptr) {
-            ggml_backend_synchronize(block.compute_backend);
-        }
-        recycle_reusable_device_buffer(buffer);
     }
     if (block.staging_ctx != nullptr) {
         ggml_free(block.staging_ctx);
@@ -1184,23 +1094,10 @@ void ModelManager::release_compute_staging_blocks(bool force,
 }
 
 void ModelManager::free_params_storage_block(ParamsStorageBlock& block) {
-    ggml_backend_buffer_t released_buffer = block.buffer;
-    block.buffer = nullptr;
-
-    ggml_backend_t sync_backend = nullptr;
-    if (released_buffer != nullptr) {
-        for (TensorState* state : block.states) {
-            if (state != nullptr && state->params_backend != nullptr &&
-                !sd_backend_is_cpu(state->params_backend)) {
-                sync_backend = state->params_backend;
-                break;
-            }
-        }
-        if (sync_backend != nullptr) {
-            ggml_backend_synchronize(sync_backend);
-        }
+    if (block.buffer != nullptr) {
+        ggml_backend_buffer_free(block.buffer);
+        block.buffer = nullptr;
     }
-
     block.mmap_tensor_stores.clear();
 
     for (TensorState* state : block.states) {
@@ -1215,9 +1112,6 @@ void ModelManager::free_params_storage_block(ParamsStorageBlock& block) {
         state->applied_lora_epoch       = UINT64_MAX;
     }
     block.states.clear();
-    if (released_buffer != nullptr) {
-        recycle_reusable_device_buffer(released_buffer);
-    }
 }
 
 void ModelManager::release_params_storage_blocks(bool force,
@@ -1291,7 +1185,6 @@ void ModelManager::release_all() {
     }
     release_compute_staging_blocks(true);
     release_params_storage_blocks(true);
-    release_reusable_device_buffers();
 }
 
 ggml_tensor* ModelManager::resolve_param_tensor(ggml_tensor* tensor) const {
@@ -1772,14 +1665,6 @@ bool ModelManager::ensure_compute_backend_capacity(
     if (fits()) {
         return true;
     }
-
-    // The mapped-buffer pool is only a latency cache. Free it before evicting
-    // live model state or declaring OOM.
-    release_reusable_device_buffers(request.compute_backend);
-    if (fits()) {
-        return true;
-    }
-
     for (const auto& entry : workspace_reclaimers_) {
         if (entry.first != request.owner_id) {
             entry.second();
